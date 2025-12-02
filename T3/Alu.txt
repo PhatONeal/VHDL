@@ -1,0 +1,148 @@
+library IEEE;
+use IEEE.std_logic_1164.all;
+use IEEE.numeric_std.all;
+
+entity Alu is
+   port(
+      -- Operandos de entrada
+      operand_a    : in  std_logic_vector(7 downto 0);
+      operand_b    : in  std_logic_vector(7 downto 0);
+      operation    : in  std_logic; -- '0': adición, '1': sustracción
+      
+      -- Resultado y banderas de estado
+      result       : out std_logic_vector(7 downto 0);
+      flag_carry   : out std_logic;
+      flag_ovflow  : out std_logic;
+      flag_sign    : out std_logic;
+      flag_zero    : out std_logic;
+      
+      -- Salidas para displays de 7 segmentos
+      display_0    : out std_logic_vector(6 downto 0);  
+      display_1    : out std_logic_vector(6 downto 0);  
+      display_2    : out std_logic_vector(6 downto 0);  
+      display_3    : out std_logic_vector(6 downto 0)   
+   );
+end entity Alu;
+
+architecture arch_Alu of Alu is
+   
+   -- Señales internas para cálculos
+   signal calc_result      : unsigned(8 downto 0);  
+   signal final_output     : std_logic_vector(7 downto 0);
+   signal signed_op_a      : signed(8 downto 0);
+   signal signed_op_b      : signed(8 downto 0);
+   
+   -- ===================================================================
+   -- Función de conversión hexadecimal a 7 segmentos
+   -- Entrada: 4 bits (nibble), Salida: 7 segmentos (activo bajo)
+   -- ===================================================================
+   function decode_hex_to_7segment(hex_digit : std_logic_vector(3 downto 0)) 
+      return std_logic_vector is
+      variable seg_pattern : std_logic_vector(6 downto 0);
+   begin
+      case hex_digit is
+         when "0000" => seg_pattern := "1000000"; -- 0
+         when "0001" => seg_pattern := "1111001"; -- 1
+         when "0010" => seg_pattern := "0100100"; -- 2
+         when "0011" => seg_pattern := "0110000"; -- 3
+         when "0100" => seg_pattern := "0011001"; -- 4
+         when "0101" => seg_pattern := "0010010"; -- 5
+         when "0110" => seg_pattern := "0000010"; -- 6
+         when "0111" => seg_pattern := "1111000"; -- 7
+         when "1000" => seg_pattern := "0000000"; -- 8
+         when "1001" => seg_pattern := "0010000"; -- 9
+         when "1010" => seg_pattern := "0001000"; -- A
+         when "1011" => seg_pattern := "0000011"; -- b
+         when "1100" => seg_pattern := "1000110"; -- C
+         when "1101" => seg_pattern := "0100001"; -- d
+         when "1110" => seg_pattern := "0000110"; -- E
+         when "1111" => seg_pattern := "0001110"; -- F
+         when others => seg_pattern := "1111111"; -- Apagado
+      end case;
+      return seg_pattern;
+   end function decode_hex_to_7segment;
+
+begin
+
+   -- ===================================================================
+   -- Bloque de operación aritmética principal
+   -- ===================================================================
+   arithmetic_operation: process(operand_a, operand_b, operation)
+   begin
+      if operation = '0' then
+         -- Operación de suma con bit de extensión para carry
+         calc_result <= ('0' & unsigned(operand_a)) + ('0' & unsigned(operand_b));
+      else
+         -- Operación de resta con bit de extensión
+         calc_result <= ('0' & unsigned(operand_a)) - ('0' & unsigned(operand_b));
+      end if;
+   end process arithmetic_operation;
+   
+   -- Extensión con signo de operandos para detección de overflow
+   signed_op_a <= signed('0' & operand_a);
+   signed_op_b <= signed('0' & operand_b);
+   
+   -- Extracción del resultado de 8 bits
+   final_output <= std_logic_vector(calc_result(7 downto 0));
+   result <= final_output;
+   
+   -- ===================================================================
+   -- Generación de bandera de acarreo (Carry)
+   -- ===================================================================
+   flag_carry <= calc_result(8);
+   
+   -- ===================================================================
+   -- Detección de desbordamiento aritmético (Overflow)
+   -- Se produce cuando el resultado excede el rango de números con signo
+   -- ===================================================================
+   overflow_detection: process(operation, signed_op_a, signed_op_b, final_output)
+      variable temp_signed_result : signed(8 downto 0);
+   begin
+      if operation = '0' then
+         -- Cálculo de suma con signo
+         temp_signed_result := signed_op_a + signed_op_b;
+         
+         -- Overflow en suma: operandos del mismo signo dan resultado de signo opuesto
+         if (signed_op_a(7) = signed_op_b(7)) and 
+            (temp_signed_result(7) /= signed_op_a(7)) then
+            flag_ovflow <= '1';
+         else
+            flag_ovflow <= '0';
+         end if;
+         
+      else
+         -- Cálculo de resta con signo
+         temp_signed_result := signed_op_a - signed_op_b;
+         
+         -- Overflow en resta: operandos de distinto signo y resultado 
+         -- tiene el mismo signo que el sustraendo
+         if (signed_op_a(7) /= signed_op_b(7)) and 
+            (temp_signed_result(7) = signed_op_b(7)) then
+            flag_ovflow <= '1';
+         else
+            flag_ovflow <= '0';
+         end if;
+      end if;
+   end process overflow_detection;
+   
+   -- ===================================================================
+   -- Generación de bandera de signo (Negative)
+   -- ===================================================================
+   flag_sign <= final_output(7);
+   
+   -- ===================================================================
+   -- Generación de bandera de cero (Zero)
+   -- ===================================================================
+   flag_zero <= '1' when unsigned(final_output) = 0 else '0';
+   
+   -- ===================================================================
+   -- Decodificación para displays de 7 segmentos
+   -- HEX0-HEX1: Resultado de la operación
+   -- HEX2-HEX3: Operando B
+   -- ===================================================================
+   display_0 <= decode_hex_to_7segment(final_output(3 downto 0));   -- Nibble bajo del resultado
+   display_1 <= decode_hex_to_7segment(final_output(7 downto 4));   -- Nibble alto del resultado
+   display_2 <= decode_hex_to_7segment(operand_b(3 downto 0));      -- Nibble bajo de operando B
+   display_3 <= decode_hex_to_7segment(operand_b(7 downto 4));      -- Nibble alto de operando B
+
+end architecture arch_Alu;
